@@ -22,6 +22,9 @@
 
 #define EDMA_TCD(ch)		(0x1000 + 32 * (ch))
 
+static int is_vf610_edma(struct fsl_edma_engine *data);
+static int is_s32v234_edma(struct fsl_edma_engine *data);
+
 static void fsl_edma_synchronize(struct dma_chan *chan)
 {
 	struct fsl_edma_chan *fsl_chan = to_fsl_edma_chan(chan);
@@ -132,39 +135,96 @@ static int
 fsl_edma_irq_init(struct platform_device *pdev, struct fsl_edma_engine *fsl_edma)
 {
 	int ret;
+	unsigned int i, j;
+	const struct fsl_edma_soc_data *socdata = fsl_edma->socdata;
 
-	fsl_edma->txirq = platform_get_irq_byname(pdev, "edma-tx");
-	if (fsl_edma->txirq < 0)
-		return fsl_edma->txirq;
-
-	fsl_edma->errirq = platform_get_irq_byname(pdev, "edma-err");
-	if (fsl_edma->errirq < 0)
-		return fsl_edma->errirq;
-
-	if (fsl_edma->txirq == fsl_edma->errirq) {
-		ret = devm_request_irq(&pdev->dev, fsl_edma->txirq,
-				fsl_edma_irq_handler, 0, "eDMA", fsl_edma);
-		if (ret) {
-			dev_err(&pdev->dev, "Can't register eDMA IRQ.\n");
-			return ret;
-		}
-	} else {
-		ret = devm_request_irq(&pdev->dev, fsl_edma->txirq,
-				fsl_edma_tx_handler, 0, "eDMA tx", fsl_edma);
-		if (ret) {
-			dev_err(&pdev->dev, "Can't register eDMA tx IRQ.\n");
-			return ret;
+	for (i = 0; i < socdata->n_irqs; i++) {
+		socdata->irqs[i].irqno = platform_get_irq_byname(pdev,
+						socdata->irqs[i].name);
+		if (socdata->irqs[i].irqno < 0) {
+			dev_err(&pdev->dev, "Can't get %s irq.\n",
+				socdata->irqs[i].name);
+			return socdata->irqs[i].irqno;
 		}
 
-		ret = devm_request_irq(&pdev->dev, fsl_edma->errirq,
-				fsl_edma_err_handler, 0, "eDMA err", fsl_edma);
-		if (ret) {
-			dev_err(&pdev->dev, "Can't register eDMA err IRQ.\n");
-			return ret;
+		for (j = 0; j < i; j++) {
+			if (socdata->irqs[i].irqno == socdata->irqs[j].irqno)
+				break;
 		}
+
+		/* Check there is a irq with multiple functionalities */
+		if (is_vf610_edma(fsl_edma))
+			if (j < i) {
+				socdata->irqs[i].irqno = -1;
+				socdata->irqs[j].name = "eDma";
+			}
+	}
+
+	for (i = 0; i < socdata->n_irqs; i++) {
+		if (socdata->irqs[i].irqno >= 0)
+			ret = devm_request_irq(&pdev->dev,
+				       socdata->irqs[i].irqno,
+				       socdata->irqs[i].irqhandler,
+				       0,
+				       socdata->irqs[i].name,
+				       fsl_edma);
+			if (ret) {
+				dev_err(&pdev->dev,
+					"Can't register %s IRQ.\n",
+					socdata->irqs[i].name);
+				return  ret;
+			}
 	}
 
 	return 0;
+}
+
+static struct fsl_edma_irq s32v234_edma_irqs[] = {
+	{"edma-err", fsl_edma_irq_handler, },
+	{"edma-tx_0-15", fsl_edma_tx_handler, },
+	{"edma-tx_16-31", fsl_edma_tx_handler, },
+};
+
+static struct fsl_edma_irq vf610_edma_irqs[] = {
+	{"edma-err", fsl_edma_irq_handler, },
+	{"edma-tx", fsl_edma_tx_handler, },
+};
+static struct fsl_edma_soc_data fsl_edma_s32v234_data = {
+	.n_irqs = ARRAY_SIZE(s32v234_edma_irqs),
+	.irqs = s32v234_edma_irqs,
+};
+
+static struct fsl_edma_soc_data fsl_edma_vf610_data = {
+	.n_irqs = ARRAY_SIZE(vf610_edma_irqs),
+	.irqs = vf610_edma_irqs,
+};
+
+static const struct of_device_id fsl_edma_dt_ids[] = {
+	{
+	  .compatible = "fsl,s32v234-edma",
+	  .data = &fsl_edma_s32v234_data,
+	},
+	{
+	  .compatible = "fsl,vf610-edma",
+	  .data = &fsl_edma_vf610_data,
+	},
+	{ 
+	  .compatible = "fsl,imx7ulp-edma",
+	  .data = &imx7ulp_data
+	},
+
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
+
+static inline int is_s32v234_edma(struct fsl_edma_engine *data)
+{
+	return data->socdata == &fsl_edma_s32v234_data;
+}
+
+static inline int is_vf610_edma(struct fsl_edma_engine *data)
+{
+	return data->socdata == &fsl_edma_vf610_data;
 }
 
 static int
@@ -241,13 +301,6 @@ static struct fsl_edma_drvdata imx7ulp_data = {
 	.has_dmaclk = true,
 	.setup_irq = fsl_edma2_irq_init,
 };
-
-static const struct of_device_id fsl_edma_dt_ids[] = {
-	{ .compatible = "fsl,vf610-edma", .data = &vf610_data},
-	{ .compatible = "fsl,imx7ulp-edma", .data = &imx7ulp_data},
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
 
 static int fsl_edma_probe(struct platform_device *pdev)
 {
