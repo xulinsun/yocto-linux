@@ -29,6 +29,7 @@ dtb-$(CONFIG_ARCH_S32) += s32v234-pciebcm.dtb
 dtb-$(CONFIG_ARCH_S32) += s32v234-pcie.dtb
 dtb-$(CONFIG_ARCH_S32) += s32v234-simulator.dtb
 dtb-$(CONFIG_ARCH_S32) += s32v234-tmdp.dtb
+dtb-$(CONFIG_ARCH_S32) += s32v244-simulator.dtb
 
 dtb-$(CONFIG_ARCH_MXC) += imx8mm-evk.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx8mn-ddr4-evk.dtb
