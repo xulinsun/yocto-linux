@@ -222,6 +222,7 @@ struct fsl_dspi {
 
 	struct regmap				*regmap;
 	struct regmap				*regmap_pushr;
+	void __iomem				*base;
 	int					irq;
 	struct clk				*clk;
 
@@ -1099,7 +1100,6 @@ static int dspi_probe(struct platform_device *pdev)
 	int ret, cs_num, bus_num;
 	struct fsl_dspi *dspi;
 	struct resource *res;
-	void __iomem *base;
 
 	ctlr = spi_alloc_master(&pdev->dev, sizeof(struct fsl_dspi));
 	if (!ctlr)
@@ -1155,9 +1155,9 @@ static int dspi_probe(struct platform_device *pdev)
 		ctlr->bits_per_word_mask = SPI_BPW_RANGE_MASK(4, 16);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(base)) {
-		ret = PTR_ERR(base);
+	dspi->base = devm_ioremap_resource(&pdev->dev, res);
+	if (IS_ERR(dspi->base)) {
+		ret = PTR_ERR(dspi->base);
 		goto out_ctlr_put;
 	}
 
@@ -1165,7 +1165,7 @@ static int dspi_probe(struct platform_device *pdev)
 		regmap_config = &dspi_xspi_regmap_config[0];
 	else
 		regmap_config = &dspi_regmap_config;
-	dspi->regmap = devm_regmap_init_mmio(&pdev->dev, base, regmap_config);
+	dspi->regmap = devm_regmap_init_mmio(&pdev->dev, base, dspi->base, regmap_config);
 	if (IS_ERR(dspi->regmap)) {
 		dev_err(&pdev->dev, "failed to init regmap: %ld\n",
 				PTR_ERR(dspi->regmap));
