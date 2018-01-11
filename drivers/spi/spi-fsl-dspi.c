@@ -175,12 +175,14 @@ struct fsl_dspi_devtype_data {
 	u8			max_clock_factor;
 	bool			xspi_mode;
 	u8			extended_mode;
+	.max_register = 0x88,
 };
 
 static const struct fsl_dspi_devtype_data vf610_data = {
 	.trans_mode		= DSPI_DMA_MODE,
 	.max_clock_factor	= 2,
 	.extended_mode = 0,
+	.max_register = 0x88,
 };
 
 static const struct fsl_dspi_devtype_data ls1021a_v1_data = {
@@ -188,24 +190,29 @@ static const struct fsl_dspi_devtype_data ls1021a_v1_data = {
 	.max_clock_factor	= 8,
 	.xspi_mode		= true,
 	.extended_mode = 0,
+	.max_register = 0x88,
+
 };
 
 static const struct fsl_dspi_devtype_data ls2085a_data = {
 	.trans_mode		= DSPI_TCFQ_MODE,
 	.max_clock_factor	= 8,
 	.extended_mode = 0,
+	.max_register = 0x88,
 };
 
 static const struct fsl_dspi_devtype_data coldfire_data = {
 	.trans_mode		= DSPI_EOQ_MODE,
 	.max_clock_factor	= 8,
 	.extended_mode = 0,
+	.max_register = 0x88,
 };
 
 static const struct fsl_dspi_devtype_data s32v234_data = {
 	.trans_mode = DSPI_EOQ_MODE,
 	.max_clock_factor = 1,
 	.extended_mode = 1,
+	.max_register = 0x13c,
 };
 
 struct fsl_dspi_dma {
@@ -1134,7 +1141,7 @@ static const struct regmap_access_table dspi_volatile_table = {
 	.n_yes_ranges	= ARRAY_SIZE(dspi_volatile_ranges),
 };
 
-static const struct regmap_config dspi_regmap_config = {
+static struct regmap_config dspi_regmap_config = {
 	.reg_bits	= 32,
 	.val_bits	= 32,
 	.reg_stride	= 4,
@@ -1245,6 +1252,7 @@ static int dspi_probe(struct platform_device *pdev)
 		}
 	}
 
+	dspi_regmap_config.max_register = dspi->devtype_data->max_register;
 	if (dspi->devtype_data->xspi_mode)
 		ctlr->bits_per_word_mask = SPI_BPW_RANGE_MASK(4, 32);
 	else
