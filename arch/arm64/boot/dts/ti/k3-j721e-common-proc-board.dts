@@ -611,6 +611,10 @@
 	mboxes = <&mailbox0_cluster3 &mbox_c66_1>;
 };
 
+&c71_0 {
+	mboxes = <&mailbox0_cluster4 &mbox_c71_0>;
+};
+
 &mcu_cpsw {
 	pinctrl-names = "default";
 	pinctrl-0 = <&mcu_cpsw_pins_default &mcu_mdio_pins_default>;
