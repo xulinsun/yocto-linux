@@ -842,8 +842,8 @@ static int hci_init4_req(struct hci_request *req, unsigned long opt)
 	if (hdev->le_features[0] & HCI_LE_DATA_LEN_EXT) {
 		struct hci_cp_le_write_def_data_len cp;
 
-		cp.tx_len = hdev->le_max_tx_len;
-		cp.tx_time = hdev->le_max_tx_time;
+		cp.tx_len = cpu_to_le16(hdev->le_max_tx_len);
+		cp.tx_time = cpu_to_le16(hdev->le_max_tx_time);
 		hci_req_add(req, HCI_OP_LE_WRITE_DEF_DATA_LEN, sizeof(cp), &cp);
 	}
 
@@ -2827,7 +2827,7 @@ int hci_add_adv_instance(struct hci_dev *hdev, u8 instance, u32 flags,
 		memset(adv_instance->scan_rsp_data, 0,
 		       sizeof(adv_instance->scan_rsp_data));
 	} else {
-		if (hdev->adv_instance_cnt >= HCI_MAX_ADV_INSTANCES ||
+		if (hdev->adv_instance_cnt >= hdev->le_num_of_adv_sets ||
 		    instance < 1 || instance > HCI_MAX_ADV_INSTANCES)
 			return -EOVERFLOW;
 
@@ -3195,11 +3195,14 @@ struct hci_dev *hci_alloc_dev(void)
 	hdev->le_min_key_size = SMP_MIN_ENC_KEY_SIZE;
 	hdev->le_tx_def_phys = HCI_LE_SET_PHY_1M;
 	hdev->le_rx_def_phys = HCI_LE_SET_PHY_1M;
+	hdev->le_num_of_adv_sets = HCI_MAX_ADV_INSTANCES;
 
 	hdev->rpa_timeout = HCI_DEFAULT_RPA_TIMEOUT;
 	hdev->discov_interleaved_timeout = DISCOV_INTERLEAVED_TIMEOUT;
 	hdev->conn_info_min_age = DEFAULT_CONN_INFO_MIN_AGE;
 	hdev->conn_info_max_age = DEFAULT_CONN_INFO_MAX_AGE;
+	hdev->auth_payload_timeout = DEFAULT_AUTH_PAYLOAD_TIMEOUT;
+	hdev->min_enc_key_size = HCI_MIN_ENC_KEY_SIZE;
 
 	mutex_init(&hdev->lock);
 	mutex_init(&hdev->req_lock);
@@ -4437,7 +4440,14 @@ static void hci_rx_work(struct work_struct *work)
 			hci_send_to_sock(hdev, skb);
 		}
 
-		if (hci_dev_test_flag(hdev, HCI_USER_CHANNEL)) {
+		/* If the device has been opened in HCI_USER_CHANNEL,
+		 * the userspace has exclusive access to device.
+		 * When device is HCI_INIT, we still need to process
+		 * the data packets to the driver in order
+		 * to complete its setup().
+		 */
+		if (hci_dev_test_flag(hdev, HCI_USER_CHANNEL) &&
+		    !test_bit(HCI_INIT, &hdev->flags)) {
 			kfree_skb(skb);
 			continue;
 		}

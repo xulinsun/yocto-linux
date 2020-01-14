@@ -44,13 +44,7 @@ static struct bpf_map *sock_map_alloc(union bpf_attr *attr)
 
 	/* Make sure page count doesn't overflow. */
 	cost = (u64) stab->map.max_entries * sizeof(struct sock *);
-	if (cost >= U32_MAX - PAGE_SIZE) {
-		err = -EINVAL;
-		goto free_stab;
-	}
-
-	stab->map.pages = round_up(cost, PAGE_SIZE) >> PAGE_SHIFT;
-	err = bpf_map_precharge_memlock(stab->map.pages);
+	err = bpf_map_charge_init(&stab->map.memory, cost);
 	if (err)
 		goto free_stab;
 
@@ -60,6 +54,7 @@ static struct bpf_map *sock_map_alloc(union bpf_attr *attr)
 	if (stab->sks)
 		return &stab->map;
 	err = -ENOMEM;
+	bpf_map_charge_finish(&stab->map.memory);
 free_stab:
 	kfree(stab);
 	return ERR_PTR(err);
@@ -350,7 +345,7 @@ static int sock_map_update_common(struct bpf_map *map, u32 idx,
 		return -EINVAL;
 	if (unlikely(idx >= map->max_entries))
 		return -E2BIG;
-	if (unlikely(icsk->icsk_ulp_data))
+	if (unlikely(rcu_access_pointer(icsk->icsk_ulp_data)))
 		return -EINVAL;
 
 	link = sk_psock_init_link();

@@ -776,7 +776,6 @@ skip_rio:
 	case MBA_LOOP_INIT_ERR:
 		ql_log(ql_log_warn, vha, 0x5090,
 		    "LOOP INIT ERROR (%x).\n", mb[1]);
-		ha->isp_ops->fw_dump(vha, 1);
 		set_bit(ISP_ABORT_NEEDED, &vha->dpc_flags);
 		break;
 
@@ -1062,8 +1061,6 @@ global_port_update:
 			ql_dbg(ql_dbg_async, vha, 0x5011,
 			    "Asynchronous PORT UPDATE ignored %04x/%04x/%04x.\n",
 			    mb[1], mb[2], mb[3]);
-
-			qlt_async_event(mb[0], vha, mb);
 			break;
 		}
 
@@ -1080,8 +1077,6 @@ global_port_update:
 		set_bit(LOOP_RESYNC_NEEDED, &vha->dpc_flags);
 		set_bit(LOCAL_LOOP_UPDATE, &vha->dpc_flags);
 		set_bit(VP_CONFIG_OK, &vha->vp_flags);
-
-		qlt_async_event(mb[0], vha, mb);
 		break;
 
 	case MBA_RSCN_UPDATE:		/* State Change Registration */
@@ -1119,10 +1114,9 @@ global_port_update:
 			struct event_arg ea;
 
 			memset(&ea, 0, sizeof(ea));
-			ea.event = FCME_RSCN;
 			ea.id.b24 = rscn_entry;
 			ea.id.b.rsvd_1 = rscn_entry >> 24;
-			qla2x00_fcport_event_handler(vha, &ea);
+			qla2x00_handle_rscn(vha, &ea);
 			qla2x00_post_aen_work(vha, FCH_EVT_RSCN, rscn_entry);
 		}
 		break;
@@ -1514,7 +1508,7 @@ qla2x00_ct_entry(scsi_qla_host_t *vha, struct req_que *req,
 		    if (comp_status == CS_DATA_UNDERRUN) {
 			    res = DID_OK << 16;
 			    bsg_reply->reply_payload_rcv_len =
-				le16_to_cpu(((sts_entry_t *)pkt)->rsp_info_len);
+				le16_to_cpu(pkt->rsp_info_len);
 
 			    ql_log(ql_log_warn, vha, 0x5048,
 				"CT pass-through-%s error comp_status=0x%x total_byte=0x%x.\n",
@@ -2257,11 +2251,8 @@ qla25xx_process_bidir_status_iocb(scsi_qla_host_t *vha, void *pkt,
 	struct bsg_job *bsg_job = NULL;
 	struct fc_bsg_request *bsg_request;
 	struct fc_bsg_reply *bsg_reply;
-	sts_entry_t *sts;
-	struct sts_entry_24xx *sts24;
-
-	sts = (sts_entry_t *) pkt;
-	sts24 = (struct sts_entry_24xx *) pkt;
+	sts_entry_t *sts = pkt;
+	struct sts_entry_24xx *sts24 = pkt;
 
 	/* Validate handle. */
 	if (index >= req->num_outstanding_cmds) {
@@ -2407,8 +2398,8 @@ qla2x00_status_entry(scsi_qla_host_t *vha, struct rsp_que *rsp, void *pkt)
 	srb_t		*sp;
 	fc_port_t	*fcport;
 	struct scsi_cmnd *cp;
-	sts_entry_t *sts;
-	struct sts_entry_24xx *sts24;
+	sts_entry_t *sts = pkt;
+	struct sts_entry_24xx *sts24 = pkt;
 	uint16_t	comp_status;
 	uint16_t	scsi_status;
 	uint16_t	ox_id;
@@ -2426,8 +2417,6 @@ qla2x00_status_entry(scsi_qla_host_t *vha, struct rsp_que *rsp, void *pkt)
 	uint16_t state_flags = 0;
 	uint16_t retry_delay = 0;
 
-	sts = (sts_entry_t *) pkt;
-	sts24 = (struct sts_entry_24xx *) pkt;
 	if (IS_FWI2_CAPABLE(ha)) {
 		comp_status = le16_to_cpu(sts24->comp_status);
 		scsi_status = le16_to_cpu(sts24->scsi_status) & SS_MASK;
@@ -2472,6 +2461,11 @@ qla2x00_status_entry(scsi_qla_host_t *vha, struct rsp_que *rsp, void *pkt)
 		}
 		return;
 	}
+
+	if (sp->abort)
+		sp->aborted = 1;
+	else
+		sp->completed = 1;
 
 	if (sp->cmd_type != TYPE_SRB) {
 		req->outstanding_cmds[handle] = NULL;
@@ -2727,7 +2721,7 @@ check_scsi_status:
 				"Port to be marked lost on fcport=%02x%02x%02x, current "
 				"port state= %s comp_status %x.\n", fcport->d_id.b.domain,
 				fcport->d_id.b.area, fcport->d_id.b.al_pa,
-				port_state_str[atomic_read(&fcport->state)],
+				port_state_str[FCS_ONLINE],
 				comp_status);
 
 			qla2x00_mark_device_lost(fcport->vha, fcport, 1, 1);
@@ -3471,10 +3465,8 @@ qla24xx_enable_msix(struct qla_hw_data *ha, struct rsp_que *rsp)
 		    ha->msix_count, ret);
 		goto msix_out;
 	} else if (ret < ha->msix_count) {
-		ql_log(ql_log_warn, vha, 0x00c6,
-		    "MSI-X: Failed to enable support "
-		     "with %d vectors, using %d vectors.\n",
-		    ha->msix_count, ret);
+		ql_log(ql_log_info, vha, 0x00c6,
+		    "MSI-X: Using %d vectors\n", ret);
 		ha->msix_count = ret;
 		/* Recalculate queue values */
 		if (ha->mqiobase && (ql2xmqsupport || ql2xnvmeenable)) {

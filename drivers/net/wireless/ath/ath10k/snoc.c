@@ -165,7 +165,7 @@ static struct ce_attr host_ce_config_wlan[] = {
 	/* CE4: host->target HTT */
 	{
 		.flags = CE_ATTR_FLAGS | CE_ATTR_DIS_INTR,
-		.src_nentries = 256,
+		.src_nentries = 2048,
 		.src_sz_max = 256,
 		.dest_nentries = 0,
 		.send_cb = ath10k_snoc_htt_tx_cb,
@@ -1050,6 +1050,19 @@ err_wlan_enable:
 	return ret;
 }
 
+static int ath10k_snoc_hif_set_target_log_mode(struct ath10k *ar,
+					       u8 fw_log_mode)
+{
+	u8 fw_dbg_mode;
+
+	if (fw_log_mode)
+		fw_dbg_mode = ATH10K_ENABLE_FW_LOG_CE;
+	else
+		fw_dbg_mode = ATH10K_ENABLE_FW_LOG_DIAG;
+
+	return ath10k_qmi_set_fw_log_mode(ar, fw_dbg_mode);
+}
+
 #ifdef CONFIG_PM
 static int ath10k_snoc_hif_suspend(struct ath10k *ar)
 {
@@ -1103,6 +1116,8 @@ static const struct ath10k_hif_ops ath10k_snoc_hif_ops = {
 	.send_complete_check	= ath10k_snoc_hif_send_complete_check,
 	.get_free_queue_number	= ath10k_snoc_hif_get_free_queue_number,
 	.get_target_info	= ath10k_snoc_hif_get_target_info,
+	.set_target_log_mode    = ath10k_snoc_hif_set_target_log_mode,
+
 #ifdef CONFIG_PM
 	.suspend                = ath10k_snoc_hif_suspend,
 	.resume                 = ath10k_snoc_hif_resume,
@@ -1246,10 +1261,19 @@ out:
 	return ret;
 }
 
+static void ath10k_snoc_quirks_init(struct ath10k *ar)
+{
+	struct ath10k_snoc *ar_snoc = ath10k_snoc_priv(ar);
+	struct device *dev = &ar_snoc->dev->dev;
+
+	if (of_property_read_bool(dev->of_node, "qcom,snoc-host-cap-8bit-quirk"))
+		set_bit(ATH10K_SNOC_FLAG_8BIT_HOST_CAP_QUIRK, &ar_snoc->flags);
+}
+
 int ath10k_snoc_fw_indication(struct ath10k *ar, u64 type)
 {
 	struct ath10k_snoc *ar_snoc = ath10k_snoc_priv(ar);
-	struct ath10k_bus_params bus_params;
+	struct ath10k_bus_params bus_params = {};
 	int ret;
 
 	if (test_bit(ATH10K_SNOC_FLAG_UNREGISTERING, &ar_snoc->flags))
@@ -1662,6 +1686,8 @@ static int ath10k_snoc_probe(struct platform_device *pdev)
 	ar_snoc->ce.bus_ops = &ath10k_snoc_bus_ops;
 	ar->ce_priv = &ar_snoc->ce;
 	msa_size = drv_data->msa_size;
+
+	ath10k_snoc_quirks_init(ar);
 
 	ret = ath10k_snoc_resource_init(ar);
 	if (ret) {

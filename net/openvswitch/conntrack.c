@@ -525,6 +525,11 @@ static int handle_fragments(struct net *net, struct sw_flow_key *key,
 		return -EPFNOSUPPORT;
 	}
 
+	/* The key extracted from the fragment that completed this datagram
+	 * likely didn't have an L4 header, so regenerate it.
+	 */
+	ovs_flow_key_update_l3l4(skb, key);
+
 	key->ip.frag = OVS_FRAG_TYPE_NONE;
 	skb_clear_hash(skb);
 	skb->ignore_df = 1;
@@ -897,6 +902,17 @@ static int ovs_ct_nat(struct net *net, struct sw_flow_key *key,
 		return NF_ACCEPT; /* Connection is not NATed. */
 	}
 	err = ovs_ct_nat_execute(skb, ct, ctinfo, &info->range, maniptype);
+
+	if (err == NF_ACCEPT &&
+	    ct->status & IPS_SRC_NAT && ct->status & IPS_DST_NAT) {
+		if (maniptype == NF_NAT_MANIP_SRC)
+			maniptype = NF_NAT_MANIP_DST;
+		else
+			maniptype = NF_NAT_MANIP_SRC;
+
+		err = ovs_ct_nat_execute(skb, ct, ctinfo, &info->range,
+					 maniptype);
+	}
 
 	/* Mark NAT done if successful and update the flow key. */
 	if (err == NF_ACCEPT)
@@ -1574,7 +1590,7 @@ static int parse_ct(const struct nlattr *attr, struct ovs_conntrack_info *info,
 		case OVS_CT_ATTR_TIMEOUT:
 			memcpy(info->timeout, nla_data(a), nla_len(a));
 			if (!memchr(info->timeout, '\0', nla_len(a))) {
-				OVS_NLERR(log, "Invalid conntrack helper");
+				OVS_NLERR(log, "Invalid conntrack timeout");
 				return -EINVAL;
 			}
 			break;

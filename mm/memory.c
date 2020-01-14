@@ -518,7 +518,7 @@ static void print_bad_pte(struct vm_area_struct *vma, unsigned long addr,
 		 (long long)pte_val(pte), (long long)pmd_val(*pmd));
 	if (page)
 		dump_page(page, "bad pte");
-	pr_alert("addr:%p vm_flags:%08lx anon_vma:%p mapping:%p index:%lx\n",
+	pr_alert("addr:%px vm_flags:%08lx anon_vma:%px mapping:%px index:%lx\n",
 		 (void *)addr, vma->vm_flags, vma->anon_vma, mapping, index);
 	pr_alert("file:%pD fault:%ps mmap:%ps readpage:%ps\n",
 		 vma->vm_file,
@@ -571,8 +571,8 @@ static void print_bad_pte(struct vm_area_struct *vma, unsigned long addr,
  * PFNMAP mappings in order to support COWable mappings.
  *
  */
-struct page *_vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
-			     pte_t pte, bool with_public_device)
+struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
+			    pte_t pte)
 {
 	unsigned long pfn = pte_pfn(pte);
 
@@ -585,29 +585,6 @@ struct page *_vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 			return NULL;
 		if (is_zero_pfn(pfn))
 			return NULL;
-
-		/*
-		 * Device public pages are special pages (they are ZONE_DEVICE
-		 * pages but different from persistent memory). They behave
-		 * allmost like normal pages. The difference is that they are
-		 * not on the lru and thus should never be involve with any-
-		 * thing that involve lru manipulation (mlock, numa balancing,
-		 * ...).
-		 *
-		 * This is why we still want to return NULL for such page from
-		 * vm_normal_page() so that we do not have to special case all
-		 * call site of vm_normal_page().
-		 */
-		if (likely(pfn <= highest_memmap_pfn)) {
-			struct page *page = pfn_to_page(pfn);
-
-			if (is_device_public_page(page)) {
-				if (with_public_device)
-					return page;
-				return NULL;
-			}
-		}
-
 		if (pte_devmap(pte))
 			return NULL;
 
@@ -797,17 +774,6 @@ copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		rss[mm_counter(page)]++;
 	} else if (pte_devmap(pte)) {
 		page = pte_page(pte);
-
-		/*
-		 * Cache coherent device memory behave like regular page and
-		 * not like persistent memory page. For more informations see
-		 * MEMORY_DEVICE_CACHE_COHERENT in memory_hotplug.h
-		 */
-		if (is_device_public_page(page)) {
-			get_page(page);
-			page_dup_rmap(page, false);
-			rss[mm_counter(page)]++;
-		}
 	}
 
 out_set_pte:
@@ -1060,10 +1026,13 @@ again:
 		if (pte_none(ptent))
 			continue;
 
+		if (need_resched())
+			break;
+
 		if (pte_present(ptent)) {
 			struct page *page;
 
-			page = _vm_normal_page(vma, addr, ptent, true);
+			page = vm_normal_page(vma, addr, ptent);
 			if (unlikely(details) && page) {
 				/*
 				 * unmap_shared_mapping_pages() wants to
@@ -1127,7 +1096,6 @@ again:
 		if (unlikely(details))
 			continue;
 
-		entry = pte_to_swp_entry(ptent);
 		if (!non_swap_entry(entry))
 			rss[MM_SWAPENTS]--;
 		else if (is_migration_entry(entry)) {
@@ -1158,8 +1126,11 @@ again:
 	if (force_flush) {
 		force_flush = 0;
 		tlb_flush_mmu(tlb);
-		if (addr != end)
-			goto again;
+	}
+
+	if (addr != end) {
+		cond_resched();
+		goto again;
 	}
 
 	return addr;
@@ -1475,8 +1446,6 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 	set_pte_at(mm, addr, pte, mk_pte(page, prot));
 
 	retval = 0;
-	pte_unmap_unlock(pte, ptl);
-	return retval;
 out_unlock:
 	pte_unmap_unlock(pte, ptl);
 out:
@@ -1547,7 +1516,7 @@ static int __vm_map_pages(struct vm_area_struct *vma, struct page **pages,
 	int ret, i;
 
 	/* Fail if the user requested offset is beyond the end of the object */
-	if (offset > num)
+	if (offset >= num)
 		return -ENXIO;
 
 	/* Fail if the user requested size exceeds available object size */
@@ -2038,7 +2007,6 @@ static int apply_to_pte_range(struct mm_struct *mm, pmd_t *pmd,
 {
 	pte_t *pte;
 	int err;
-	pgtable_t token;
 	spinlock_t *uninitialized_var(ptl);
 
 	pte = (mm == &init_mm) ?
@@ -2051,10 +2019,8 @@ static int apply_to_pte_range(struct mm_struct *mm, pmd_t *pmd,
 
 	arch_enter_lazy_mmu_mode();
 
-	token = pmd_pgtable(*pmd);
-
 	do {
-		err = fn(pte++, token, addr, data);
+		err = fn(pte++, addr, data);
 		if (err)
 			break;
 	} while (addr += PAGE_SIZE, addr != end);
@@ -2235,6 +2201,10 @@ static vm_fault_t do_page_mkwrite(struct vm_fault *vmf)
 
 	vmf->flags = FAULT_FLAG_WRITE|FAULT_FLAG_MKWRITE;
 
+	if (vmf->vma->vm_file &&
+	    IS_SWAPFILE(vmf->vma->vm_file->f_mapping->host))
+		return VM_FAULT_SIGBUS;
+
 	ret = vmf->vma->vm_ops->page_mkwrite(vmf);
 	/* Restore original flags so that caller is not surprised */
 	vmf->flags = old_flags;
@@ -2257,10 +2227,11 @@ static vm_fault_t do_page_mkwrite(struct vm_fault *vmf)
  *
  * The function expects the page to be locked and unlocks it.
  */
-static void fault_dirty_shared_page(struct vm_area_struct *vma,
-				    struct page *page)
+static vm_fault_t fault_dirty_shared_page(struct vm_fault *vmf)
 {
+	struct vm_area_struct *vma = vmf->vma;
 	struct address_space *mapping;
+	struct page *page = vmf->page;
 	bool dirtied;
 	bool page_mkwrite = vma->vm_ops && vma->vm_ops->page_mkwrite;
 
@@ -2275,16 +2246,30 @@ static void fault_dirty_shared_page(struct vm_area_struct *vma,
 	mapping = page_rmapping(page);
 	unlock_page(page);
 
-	if ((dirtied || page_mkwrite) && mapping) {
-		/*
-		 * Some device drivers do not set page.mapping
-		 * but still dirty their pages
-		 */
-		balance_dirty_pages_ratelimited(mapping);
-	}
-
 	if (!page_mkwrite)
 		file_update_time(vma->vm_file);
+
+	/*
+	 * Throttle page dirtying rate down to writeback speed.
+	 *
+	 * mapping may be NULL here because some device drivers do not
+	 * set page.mapping but still dirty their pages
+	 *
+	 * Drop the mmap_sem before waiting on IO, if we can. The file
+	 * is pinning the mapping, as per above.
+	 */
+	if ((dirtied || page_mkwrite) && mapping) {
+		struct file *fpin;
+
+		fpin = maybe_unlock_mmap_for_io(vmf, NULL);
+		balance_dirty_pages_ratelimited(mapping);
+		if (fpin) {
+			fput(fpin);
+			return VM_FAULT_RETRY;
+		}
+	}
+
+	return 0;
 }
 
 /*
@@ -2527,6 +2512,7 @@ static vm_fault_t wp_page_shared(struct vm_fault *vmf)
 	__releases(vmf->ptl)
 {
 	struct vm_area_struct *vma = vmf->vma;
+	vm_fault_t ret = VM_FAULT_WRITE;
 
 	get_page(vmf->page);
 
@@ -2550,10 +2536,10 @@ static vm_fault_t wp_page_shared(struct vm_fault *vmf)
 		wp_page_reuse(vmf);
 		lock_page(vmf->page);
 	}
-	fault_dirty_shared_page(vma, vmf->page);
+	ret |= fault_dirty_shared_page(vmf);
 	put_page(vmf->page);
 
-	return VM_FAULT_WRITE;
+	return ret;
 }
 
 /*
@@ -2782,13 +2768,8 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 			migration_entry_wait(vma->vm_mm, vmf->pmd,
 					     vmf->address);
 		} else if (is_device_private_entry(entry)) {
-			/*
-			 * For un-addressable device memory we call the pgmap
-			 * fault handler callback. The callback must migrate
-			 * the page back to some CPU accessible page.
-			 */
-			ret = device_private_entry_fault(vma, vmf->address, entry,
-						 vmf->flags, vmf->pmd);
+			vmf->page = device_private_entry_to_page(entry);
+			ret = vmf->page->pgmap->ops->migrate_to_ram(vmf);
 		} else if (is_hwpoison_entry(entry)) {
 			ret = VM_FAULT_HWPOISON;
 		} else {
@@ -3206,19 +3187,6 @@ map_pte:
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGE_PAGECACHE
-
-#define HPAGE_CACHE_INDEX_MASK (HPAGE_PMD_NR - 1)
-static inline bool transhuge_vma_suitable(struct vm_area_struct *vma,
-		unsigned long haddr)
-{
-	if (((vma->vm_start >> PAGE_SHIFT) & HPAGE_CACHE_INDEX_MASK) !=
-			(vma->vm_pgoff & HPAGE_CACHE_INDEX_MASK))
-		return false;
-	if (haddr < vma->vm_start || haddr + HPAGE_PMD_SIZE > vma->vm_end)
-		return false;
-	return true;
-}
-
 static void deposit_prealloc_pte(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
@@ -3615,7 +3583,7 @@ static vm_fault_t do_shared_fault(struct vm_fault *vmf)
 		return ret;
 	}
 
-	fault_dirty_shared_page(vma, vmf->page);
+	ret |= fault_dirty_shared_page(vmf);
 	return ret;
 }
 
