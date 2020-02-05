@@ -614,3 +614,7 @@
 &pruss2_tm {
 	status = "okay";
 };
+
+&bb2d {
+	status = "okay";
+};
