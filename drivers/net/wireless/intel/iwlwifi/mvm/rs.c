@@ -3704,7 +3704,7 @@ int rs_pretty_print_rate(char *buf, int bufsz, const u32 rate)
 	    !(rate & RATE_MCS_HE_MSK)) {
 		int index = iwl_hwrate_to_plcp_idx(rate);
 
-		return scnprintf(buf, bufsz, "Legacy | ANT: %s Rate: %s Mbps\n",
+		return scnprintf(buf, bufsz, "Legacy | ANT: %s Rate: %s Mbps",
 				 rs_pretty_ant(ant),
 				 index == IWL_RATE_INVALID ? "BAD" :
 				 iwl_rate_mcs[index].mbps);
@@ -3747,7 +3747,7 @@ int rs_pretty_print_rate(char *buf, int bufsz, const u32 rate)
 	}
 
 	return scnprintf(buf, bufsz,
-			 "0x%x: %s | ANT: %s BW: %s MCS: %d NSS: %d %s%s%s%s\n",
+			 "0x%x: %s | ANT: %s BW: %s MCS: %d NSS: %d %s%s%s%s",
 			 rate, type, rs_pretty_ant(ant), bw, mcs, nss,
 			 (rate & RATE_MCS_SGI_MSK) ? "SGI " : "NGI ",
 			 (rate & RATE_MCS_STBC_MSK) ? "STBC " : "",
@@ -3895,6 +3895,8 @@ static ssize_t rs_sta_dbgfs_scale_table_read(struct file *file,
 		desc += scnprintf(buff + desc, bufsz - desc,
 				  " rate[%d] 0x%X ", i, r);
 		desc += rs_pretty_print_rate(buff + desc, bufsz - desc, r);
+		if (desc < bufsz - 1)
+			buff[desc++] = '\n';
 	}
 
 	ret = simple_read_from_buffer(user_buf, count, ppos, buff, desc);
