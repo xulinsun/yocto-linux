@@ -47,7 +47,7 @@ MODULE_DEVICE_TABLE(pci, pciidlist);
 
 static int mga_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
-	drm_fb_helper_remove_conflicting_pci_framebuffers(pdev, 0, "mgag200drmfb");
+	drm_fb_helper_remove_conflicting_pci_framebuffers(pdev, "mgag200drmfb");
 
 	return drm_get_pci_dev(pdev, ent, &driver);
 }
@@ -59,10 +59,36 @@ static void mga_pci_remove(struct pci_dev *pdev)
 	drm_put_dev(dev);
 }
 
-static const struct file_operations mgag200_driver_fops = {
-	.owner = THIS_MODULE,
-	DRM_VRAM_MM_FILE_OPERATIONS
-};
+DEFINE_DRM_GEM_FOPS(mgag200_driver_fops);
+
+static bool mgag200_pin_bo_at_0(const struct mga_device *mdev)
+{
+	return mdev->flags & MGAG200_FLAG_HW_BUG_NO_STARTADD;
+}
+
+int mgag200_driver_dumb_create(struct drm_file *file,
+			       struct drm_device *dev,
+			       struct drm_mode_create_dumb *args)
+{
+	struct mga_device *mdev = dev->dev_private;
+	unsigned long pg_align;
+
+	if (WARN_ONCE(!dev->vram_mm, "VRAM MM not initialized"))
+		return -EINVAL;
+
+	pg_align = 0ul;
+
+	/*
+	 * Aligning scanout buffers to the size of the video ram forces
+	 * placement at offset 0. Works around a bug where HW does not
+	 * respect 'startadd' field.
+	 */
+	if (mgag200_pin_bo_at_0(mdev))
+		pg_align = PFN_UP(mdev->mc.vram_size);
+
+	return drm_gem_vram_fill_create_dumb(file, dev, &dev->vram_mm->bdev,
+					     pg_align, false, args);
+}
 
 static bool mgag200_pin_bo_at_0(const struct mga_device *mdev)
 {
@@ -104,6 +130,7 @@ static struct drm_driver driver = {
 	.major = DRIVER_MAJOR,
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
+	.debugfs_init = drm_vram_mm_debugfs_init,
 	.dumb_create = mgag200_driver_dumb_create,
 	.dumb_map_offset = drm_gem_vram_driver_dumb_mmap_offset,
 	.gem_prime_mmap = drm_gem_prime_mmap,

@@ -127,15 +127,6 @@ void hsr_del_nodes(struct list_head *node_db)
 		kfree(node);
 }
 
-void hsr_del_nodes(struct list_head *node_db)
-{
-	struct hsr_node *node;
-	struct hsr_node *tmp;
-
-	list_for_each_entry_safe(node, tmp, node_db, mac_list)
-		kfree(node);
-}
-
 /* Allocate an hsr_node and add it to node_db. 'addr' is the node's address_A;
  * seq_out is used to initialize filtering of outgoing duplicate frames
  * originating from the newly added node.
