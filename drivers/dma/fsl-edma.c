@@ -3,6 +3,7 @@
  * drivers/dma/fsl-edma.c
  *
  * Copyright 2013-2014 Freescale Semiconductor, Inc.
+ * Copyright 2017-2020 NXP
  *
  * Driver for the Freescale eDMA engine with flexible channel multiplexing
  * capability for DMA request sources. The eDMA block can be found on some
@@ -108,6 +109,14 @@ static irqreturn_t fsl_edma3_tx_handler(int irq, void *dev_id)
 			fsl_chan = &fsl_edma->chans[ch];
 
 			spin_lock(&fsl_chan->vchan.lock);
+			/* It is possible that fsl_edma_terminate_all() has
+			 * canceled transfers on this channel
+			 */
+			if (!fsl_chan->edesc) {
+				spin_unlock(&fsl_chan->vchan.lock);
+				continue;
+			}
+
 			if (!fsl_chan->edesc->iscyclic) {
 				list_del(&fsl_chan->edesc->vdesc.node);
 				vchan_cookie_complete(&fsl_chan->edesc->vdesc);
@@ -266,12 +275,55 @@ fsl_edma_irq_init(struct platform_device *pdev, struct fsl_edma_engine *fsl_edma
 	return 0;
 }
 
-static unsigned s32v234_mux_channel_mapping(u32 channel_id)
+static int
+fsl_edma2_irq_init(struct platform_device *pdev,
+		   struct fsl_edma_engine *fsl_edma)
+{
+	int i, ret, irq;
+	int count;
+
+	count = platform_irq_count(pdev);
+	dev_dbg(&pdev->dev, "%s Found %d interrupts\r\n", __func__, count);
+	if (count <= 2) {
+		dev_err(&pdev->dev, "Interrupts in DTS not correct.\n");
+		return -EINVAL;
+	}
+	/*
+	 * 16 channel independent interrupts + 1 error interrupt on i.mx7ulp.
+	 * 2 channel share one interrupt, for example, ch0/ch16, ch1/ch17...
+	 * For now, just simply request irq without IRQF_SHARED flag, since 16
+	 * channels are enough on i.mx7ulp whose M4 domain own some peripherals.
+	 */
+	for (i = 0; i < count; i++) {
+		irq = platform_get_irq(pdev, i);
+		if (irq < 0)
+			return -ENXIO;
+
+		sprintf(fsl_edma->chans[i].chan_name, "eDMA2-CH%02d", i);
+
+		/* The last IRQ is for eDMA err */
+		if (i == count - 1)
+			ret = devm_request_irq(&pdev->dev, irq,
+						fsl_edma_err_handler,
+						0, "eDMA2-ERR", fsl_edma);
+		else
+			ret = devm_request_irq(&pdev->dev, irq,
+						fsl_edma_tx_handler, 0,
+						fsl_edma->chans[i].chan_name,
+						fsl_edma);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static unsigned int s32v234_mux_channel_mapping(u32 channel_id)
 {
 	return 4 * (channel_id/4) + ((4 - channel_id % 4) - 1);
 }
 
-static unsigned vf610_mux_channel_mapping(u32 channel_id)
+static unsigned int vf610_mux_channel_mapping(u32 channel_id)
 {
 	return channel_id;
 }
@@ -377,6 +429,13 @@ static struct fsl_edma_drvdata fsl_edma_vf610_data = {
 	.ops = &fsl_edma_ops,
 };
 
+static struct fsl_edma_drvdata imx7ulp_data = {
+	.version = v3,
+	.dmamuxs = 1,
+	.has_dmaclk = true,
+	.setup_irq = fsl_edma2_irq_init,
+};
+
 static const struct of_device_id fsl_edma_dt_ids[] = {
 	{
 	  .compatible = "fsl,s32gen1-edma",
@@ -390,11 +449,8 @@ static const struct of_device_id fsl_edma_dt_ids[] = {
 	  .compatible = "fsl,vf610-edma",
 	  .data = &fsl_edma_vf610_data,
 	},
-	{ 
-	  .compatible = "fsl,imx7ulp-edma",
-	  .data = &imx7ulp_data
-	},
-
+	{ .compatible = "fsl,imx7ulp-edma",
+	  .data = &imx7ulp_data},
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
@@ -414,48 +470,7 @@ static inline int is_vf610_edma(struct fsl_edma_engine *data)
 	return data->drvdata == &fsl_edma_vf610_data;
 }
 
-static int
-fsl_edma2_irq_init(struct platform_device *pdev,
-		   struct fsl_edma_engine *fsl_edma)
-{
-	int i, ret, irq;
-	int count;
 
-	count = platform_irq_count(pdev);
-	dev_dbg(&pdev->dev, "%s Found %d interrupts\r\n", __func__, count);
-	if (count <= 2) {
-		dev_err(&pdev->dev, "Interrupts in DTS not correct.\n");
-		return -EINVAL;
-	}
-	/*
-	 * 16 channel independent interrupts + 1 error interrupt on i.mx7ulp.
-	 * 2 channel share one interrupt, for example, ch0/ch16, ch1/ch17...
-	 * For now, just simply request irq without IRQF_SHARED flag, since 16
-	 * channels are enough on i.mx7ulp whose M4 domain own some peripherals.
-	 */
-	for (i = 0; i < count; i++) {
-		irq = platform_get_irq(pdev, i);
-		if (irq < 0)
-			return -ENXIO;
-
-		sprintf(fsl_edma->chans[i].chan_name, "eDMA2-CH%02d", i);
-
-		/* The last IRQ is for eDMA err */
-		if (i == count - 1)
-			ret = devm_request_irq(&pdev->dev, irq,
-						fsl_edma_err_handler,
-						0, "eDMA2-ERR", fsl_edma);
-		else
-			ret = devm_request_irq(&pdev->dev, irq,
-						fsl_edma_tx_handler, 0,
-						fsl_edma->chans[i].chan_name,
-						fsl_edma);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
 
 static void fsl_disable_clocks(struct fsl_edma_engine *fsl_edma, int nr_clocks)
 {
@@ -464,19 +479,6 @@ static void fsl_disable_clocks(struct fsl_edma_engine *fsl_edma, int nr_clocks)
 	for (i = 0; i < nr_clocks; i++)
 		clk_disable_unprepare(fsl_edma->muxclk[i]);
 }
-
-static struct fsl_edma_drvdata vf610_data = {
-	.version = v1,
-	.dmamuxs = DMAMUX_NR,
-	.setup_irq = fsl_edma_irq_init,
-};
-
-static struct fsl_edma_drvdata imx7ulp_data = {
-	.version = v3,
-	.dmamuxs = 1,
-	.has_dmaclk = true,
-	.setup_irq = fsl_edma2_irq_init,
-};
 
 static int fsl_edma_probe(struct platform_device *pdev)
 {
@@ -491,6 +493,7 @@ static int fsl_edma_probe(struct platform_device *pdev)
 	struct resource *res;
 	int len, chans;
 	int ret, i;
+	unsigned int ch;
 
 	if (of_id)
 		drvdata = of_id->data;
@@ -575,18 +578,7 @@ static int fsl_edma_probe(struct platform_device *pdev)
 		fsl_chan->dma_dir = DMA_NONE;
 		fsl_chan->vchan.desc_free = fsl_edma_free_desc;
 		vchan_init(&fsl_chan->vchan, &fsl_edma->dma_dev);
-
-		hw_tcd = (struct fsl_edma_hw_tcd *)
-			fsl_edma->drvdata->ops->edma_get_tcd_addr(fsl_chan);
-
-		edma_writew(fsl_edma, 0x0, &hw_tcd->csr);
-		fsl_edma_chan_mux(fsl_chan, 0, false);
 	}
-
-	edma_writel(fsl_edma, ~0, regs->intl);
-	ret = fsl_edma->drvdata->setup_irq(pdev, fsl_edma);
-	if (ret)
-		return ret;
 
 	dma_cap_set(DMA_PRIVATE, fsl_edma->dma_dev.cap_mask);
 	dma_cap_set(DMA_SLAVE, fsl_edma->dma_dev.cap_mask);
@@ -621,6 +613,27 @@ static int fsl_edma_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	for (i = 0; i < fsl_edma->n_chans; i++) {
+		struct fsl_edma_chan *fsl_chan = &fsl_edma->chans[i];
+
+		hw_tcd = (struct fsl_edma_hw_tcd *)
+			fsl_edma->drvdata->ops->edma_get_tcd_addr(fsl_chan);
+
+		edma_writew(fsl_edma, 0x0, &hw_tcd->csr);
+		fsl_edma_chan_mux(fsl_chan, 0, false);
+	}
+
+	if (is_s32gen1_edma(fsl_edma))
+		for (ch = 0; ch < fsl_edma->n_chans; ch++)
+			edma_writel(fsl_edma, EDMA3_CHn_INT_INT,
+				    fsl_edma->membase + EDMA3_CHn_INT(ch));
+	else
+		edma_writel(fsl_edma, ~0, fsl_edma->membase + EDMA_INTR);
+
+	ret = fsl_edma_irq_init(pdev, fsl_edma);
+	if (ret)
+		return ret;
+
 	ret = of_dma_controller_register(np, fsl_edma_xlate, fsl_edma);
 	if (ret) {
 		dev_err(&pdev->dev,
@@ -631,7 +644,7 @@ static int fsl_edma_probe(struct platform_device *pdev)
 	}
 
 	/* enable round robin arbitration */
-		fsl_edma->drvdata->ops->edma_disable_request(fsl_chan);
+	fsl_edma->drvdata->ops->edma_enable_arbitration(fsl_edma);
 
 	return 0;
 }
@@ -641,6 +654,7 @@ static int fsl_edma_remove(struct platform_device *pdev)
 	struct device_node *np = pdev->dev.of_node;
 	struct fsl_edma_engine *fsl_edma = platform_get_drvdata(pdev);
 
+	fsl_edma_cleanup_vchan(&fsl_edma->dma_dev);
 	fsl_edma_irq_exit(pdev, fsl_edma);
 	fsl_edma_cleanup_vchan(&fsl_edma->dma_dev);
 	of_dma_controller_free(np);
@@ -663,7 +677,7 @@ static int fsl_edma_suspend_late(struct device *dev)
 		/* Make sure chan is idle or will force disable. */
 		if (unlikely(!fsl_chan->idle)) {
 			dev_warn(dev, "WARN: There is non-idle channel.");
-			fsl_edma_disable_request(fsl_chan);
+			fsl_edma->drvdata->ops->edma_disable_request(fsl_chan);
 			fsl_edma_chan_mux(fsl_chan, 0, false);
 		}
 
