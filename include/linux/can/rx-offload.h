@@ -4,6 +4,7 @@
  *
  * Copyright (c) 2014 David Jander, Protonic Holland
  * Copyright (c) 2014-2017 Pengutronix, Marc Kleine-Budde <kernel@pengutronix.de>
+ * Copyright 2019-2020 NXP
  */
 
 #ifndef _CAN_RX_OFFLOAD_H

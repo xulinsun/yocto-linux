@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2014 David Jander, Protonic Holland
  * Copyright (C) 2014-2017 Pengutronix, Marc Kleine-Budde <kernel@pengutronix.de>
+ * Copyright 2019-2020 NXP
  */
 
 #include <linux/can/dev.h>
@@ -107,31 +108,10 @@ static int can_rx_offload_compare(struct sk_buff *a, struct sk_buff *b)
 	return cb_b->timestamp - cb_a->timestamp;
 }
 
-/**
- * can_rx_offload_offload_one() - Read one CAN frame from HW
- * @offload: pointer to rx_offload context
- * @n: number of mailbox to read
- *
- * The task of this function is to read a CAN frame from mailbox @n
- * from the device and return the mailbox's content as a struct
- * sk_buff.
- *
- * If the struct can_rx_offload::skb_queue exceeds the maximal queue
- * length (struct can_rx_offload::skb_queue_len_max) or no skb can be
- * allocated, the mailbox contents is discarded by reading it into an
- * overflow buffer. This way the mailbox is marked as free by the
- * driver.
- *
- * Return: A pointer to skb containing the CAN frame on success.
- *
- *         NULL if the mailbox @n is empty.
- *
- *         ERR_PTR() in case of an error
- */
-static struct sk_buff *
-can_rx_offload_offload_one(struct can_rx_offload *offload, unsigned int n)
+static struct sk_buff *can_rx_offload_offload_one(struct can_rx_offload
+		*offload, unsigned int n)
 {
-	struct sk_buff *skb = NULL, *skb_error = NULL;
+	struct sk_buff *skb = NULL;
 	u32 timestamp;
 	bool drop;
 
@@ -146,6 +126,7 @@ can_rx_offload_offload_one(struct can_rx_offload *offload, unsigned int n)
 
 		cb->timestamp = timestamp;
  	}
+ 
 	return skb;
 }
 
