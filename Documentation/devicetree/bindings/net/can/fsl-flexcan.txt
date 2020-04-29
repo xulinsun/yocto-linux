@@ -54,6 +54,17 @@ Optional properties:
 
 - wakeup-source: enable CAN remote wakeup
 
+- interrupt-names: Allows the interrupt specifiers in "interrupts" to be stated
+                   in any order, one for each name in here. Can contain:
+                   "state" - BOFFINT | BOFFDONEINT | TWRNINT | RWRNINT;
+                   "berr" - ERRINT;
+                   "mb_0-7" - MB0-7 interrupts;
+                   "mb_8-127" - MB8-127 interrupts;
+                   "state-berr" - ERRINT | BOFFINT | BOFFDONEINT | TWRNINT |
+                                  RWRNINT;
+                   "mb" - all MB interrupts;
+                   "all" - all interrupts combined.
+
 - s32v234-ocotp: On S32V234 SoCs, phandle pointer to the On-Chip One Time
                  Programmable (OCOTP) node, if CAN FD support is desired on
                  compatible parts
