@@ -854,6 +854,7 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 	enum dspi_trans_mode trans_mode;
 	struct spi_transfer *transfer;
 	int status = 0;
+	unsigned int val;
 
 	message->actual_length = 0;
 
