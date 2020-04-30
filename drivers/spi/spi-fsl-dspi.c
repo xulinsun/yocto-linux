@@ -51,7 +51,6 @@
 #define SPI_MCR_HALT		(1 << 0)
 
 /* Transfer Count Register (SPI_TCR) */
-
 #define SPI_TCR				0x08
 #define SPI_TCR_GET_TCNT(x)		(((x) & GENMASK(31, 16)) >> 16)
 
@@ -102,11 +101,13 @@
 #define SPI_RSER_TCFQE			BIT(31)
 #define SPI_RSER_EOQFE			BIT(28)
 
+/* PUSH TX FIFO Register in Master Mode (SPI_PUSHR) */
 #define SPI_PUSHR			0x34
 #define SPI_PUSHR_CMD_CONT		BIT(15)
 #define SPI_PUSHR_CMD_CTAS(x)		(((x) << 12 & GENMASK(14, 12)))
 #define SPI_PUSHR_CMD_EOQ		BIT(11)
 #define SPI_PUSHR_CMD_CTCNT		BIT(10)
+#define SPI_PUSHR_CTCNT		 (SPI_PUSHR_CMD_CTCNT << 16)
 #define SPI_PUSHR_CMD_PCS(x, y)	((1 << (x)) & (y))
 #define SPI_PUSHR_PCS(x, y)	(SPI_PUSHR_CMD_PCS(x, y) << 16)
 #define SPI_PUSHR_SLAVE			0x34
