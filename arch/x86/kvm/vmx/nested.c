@@ -5171,7 +5171,7 @@ static int handle_invept(struct kvm_vcpu *vcpu)
 	 */
 		break;
 	default:
-		BUG_ON(1);
+		BUG();
 		break;
 	}
 
