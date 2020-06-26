@@ -23,8 +23,6 @@ Optional properties:
    from userspace
 - spi-fifo-size: the number of FIFO buffer entries, for both TX and RX. Defaults
   to 4.
-- spi-extended-mode: Empty property specifying the Extended (32-bit) SPI Mode
-  support.
 - compatible = "spidev" if a spidev driver is used to interface the spi
   from userspace
  
