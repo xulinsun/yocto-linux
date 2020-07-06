@@ -1083,12 +1083,8 @@ int tpm_tis_core_init(struct device *dev, struct tpm_tis_data *priv, int irq,
 		goto err_start;
 
 	return 0;
-
-err_probe:
-	tpm_chip_stop(chip);
-
-err_start:
-	if ((chip->ops != NULL) && (chip->ops->clk_enable != NULL))
+out_err:
+	if (chip->ops->clk_enable != NULL)
 		chip->ops->clk_enable(chip, false);
 
 	tpm_tis_remove(chip);
