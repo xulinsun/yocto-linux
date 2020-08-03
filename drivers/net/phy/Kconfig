@@ -374,6 +374,11 @@ config FIXED_PHY
 
 	  Currently tested with mpc866ads and mpc8349e-mitx.
 
+config BCM89XXX_PHY
+	tristate "Driver for Broadcom BCM89610 PHY"
+	help
+	  Currently supports the BCM89610 1G Ethernet PHY.
+
 config ICPLUS_PHY
 	tristate "ICPlus PHYs"
 	---help---
@@ -490,6 +495,11 @@ config XILINX_GMII2RGMII
 	  This driver support xilinx GMII to RGMII IP core it provides
 	  the Reduced Gigabit Media Independent Interface(RGMII) between
 	  Ethernet physical media devices and the Gigabit Ethernet controller.
+
+config NXP_TJA110X_PHY
+	tristate "Driver for NXP TJA110X PHY"
+	help
+	  Currently supports the TJA110X Ethernet PHYs.
 
 endif # PHYLIB
 

@@ -1106,7 +1106,7 @@
 
 		linflex,<addr>
 			Use early console provided by Freescale LinFlex UART
-			serial driver for NXP S32V234 SoCs. A valid base
+			serial driver for NXP S32 SoC family. A valid base
 			address must be provided, and the serial port must
 			already be setup and configured.
 
@@ -5168,6 +5168,11 @@
 					even if the device claims no cache,
 					not on uas)
 			Example: quirks=0419:aaf5:rl,0421:0433:rc
+			It's also possible to apply a set of flags for all
+			devices in case of a limitation of the controller
+			using *:*:Flags.
+			Example: quirks=*:*:r,0419:aaf5:l,0421:0433:c
+			is equivalent of quirks=0419:aaf5:rl,0421:0433:rc
 
 	user_debug=	[KNL,ARM]
 			Format: <int>

@@ -1,0 +1,174 @@
+/*
+ * Copyright 2015-2016 Freescale Semiconductor, Inc.
+ * Copyright 2016-2020 NXP
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ */
+
+/dts-v1/;
+#include "fsl-s32v234-evb2016q4.dtsi"
+
+/ {
+	compatible = "fsl,s32v234-bbmini", "fsl,s32v234-evb2016q4", "fsl,s32v234";
+};
+
+&fec {
+	phy-mode = "rgmii";
+	status = "okay";
+	fixed-link {
+		speed=<1000>;
+		full-duplex;
+	};
+	mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		phy0: ethernet-phy@3 {
+			reg = <3>;
+		};
+		/* Mini Bluebox has 8 NXP TJA1102 PHYs. */
+		phy1: ethernet-phy@4 {
+			reg = <4>;
+			max-speed = <100>;
+		};
+		phy2: ethernet-phy@5 {
+			reg = <5>;
+			max-speed = <100>;
+		};
+		phy3: ethernet-phy@6 {
+			reg = <6>;
+			max-speed = <100>;
+		};
+		phy4: ethernet-phy@7 {
+			reg = <7>;
+			max-speed = <100>;
+		};
+		phy5: ethernet-phy@8 {
+			reg = <8>;
+			max-speed = <100>;
+		};
+		phy6: ethernet-phy@9 {
+			reg = <9>;
+			max-speed = <100>;
+		};
+		phy7: ethernet-phy@10 {
+			reg = <10>;
+			max-speed = <100>;
+		};
+		phy8: ethernet-phy@11 {
+			reg = <11>;
+			max-speed = <100>;
+		};
+	};
+};
+
+&spi0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	sja1105p@0 {
+		compatible = "nxp,sja1105p-switch";
+		spi-max-frequency = <0x3D0900>;  // 4000000
+		spi-cpha;
+		fsl,spi-cs-sck-delay = <100>;
+		fsl,spi-sck-cs-delay = <100>;
+
+		reg = <0>;
+		port-0 {
+			is-host = <0x1>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-1 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-2 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-3 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-4 {
+			is-host = <0x0>;
+			null-phy = <0x0>;
+			phy-ref = < &phy0 >;
+		};
+	};
+
+	sja1105p@5 {
+		compatible = "nxp,sja1105p-switch";
+		spi-max-frequency = <0x3D0900>;
+		spi-cpha;
+		fsl,spi-cs-sck-delay = <100>;
+		fsl,spi-sck-cs-delay = <100>;
+
+		reg = <5>;
+		port-0 {
+			is-host = <0x1>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-1 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-2 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-3 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-4 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+	};
+
+	sja1105p@4 {
+		compatible = "nxp,sja1105p-switch";
+		spi-max-frequency = <0x3D0900>;
+		fsl,spi-cs-sck-delay = <100>;
+		fsl,spi-sck-cs-delay = <100>;
+
+		reg = <4>;
+		port-0 {
+			is-host = <0x1>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-1 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-2 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-3 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+		port-4 {
+			is-host = <0x0>;
+			null-phy = <0x1>;
+			phy-ref = < 0 >;
+		};
+	};
+};

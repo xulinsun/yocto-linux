@@ -160,6 +160,10 @@
 #define ESDHC_FLAG_CQHCI		BIT(12)
 /* need request pmqos during low power */
 #define ESDHC_FLAG_PMQOS		BIT(13)
+/* need request bus freq during low power */
+#define ESDHC_FLAG_BUSFREQ		BIT(14)
+/* IP support ESDHC multiblock read ACMD 12 */
+#define ESDHC_FLAG_MULTIBLK_READ_ACMD12	BIT(15)
 
 struct esdhc_soc_data {
 	u32 flags;
@@ -221,12 +225,32 @@ static struct esdhc_soc_data usdhc_imx8qxp_data = {
 			| ESDHC_FLAG_CQHCI,
 };
 
+static struct esdhc_soc_data esdhc_vf610_data = {
+	.flags = ESDHC_FLAG_MULTIBLK_READ_ACMD12,
+};
+
+static struct esdhc_soc_data usdhc_sac58r_data = {
+	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_MULTIBLK_READ_ACMD12,
+};
+
+static struct esdhc_soc_data usdhc_s32v234_data = {
+	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_MULTIBLK_READ_ACMD12,
+};
+
+static struct esdhc_soc_data usdhc_s32gen1_data = {
+	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_MULTIBLK_READ_ACMD12
+			| ESDHC_FLAG_HS200,
+};
+
 struct pltfm_imx_data {
 	u32 scratchpad;
+#if !defined(CONFIG_SOC_S32GEN1)
+	/* FIXME: we skip pinctrl initialization as it is incomplete and crashes probing */
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *pins_default;
 	struct pinctrl_state *pins_100mhz;
 	struct pinctrl_state *pins_200mhz;
+#endif
 	const struct esdhc_soc_data *socdata;
 	struct esdhc_platform_data boarddata;
 	struct clk *clk_ipg;
@@ -270,6 +294,10 @@ static const struct of_device_id imx_esdhc_dt_ids[] = {
 	{ .compatible = "fsl,imx7d-usdhc", .data = &usdhc_imx7d_data, },
 	{ .compatible = "fsl,imx7ulp-usdhc", .data = &usdhc_imx7ulp_data, },
 	{ .compatible = "fsl,imx8qxp-usdhc", .data = &usdhc_imx8qxp_data, },
+	{ .compatible = "fsl,vf610-esdhc", .data = &esdhc_vf610_data, },
+	{ .compatible = "fsl,sac58r-usdhc", .data = &usdhc_sac58r_data, },
+	{ .compatible = "fsl,s32v234-usdhc", .data = &usdhc_s32v234_data,},
+	{ .compatible = "fsl,s32gen1-usdhc", .data = &usdhc_s32gen1_data,},
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, imx_esdhc_dt_ids);
@@ -287,6 +315,21 @@ static inline int is_imx53_esdhc(struct pltfm_imx_data *data)
 static inline int is_imx6q_usdhc(struct pltfm_imx_data *data)
 {
 	return data->socdata == &usdhc_imx6q_data;
+}
+
+static inline int is_sac58r_usdhc(struct pltfm_imx_data *data)
+{
+	return data->socdata == &usdhc_sac58r_data;
+}
+
+static inline int is_s32v234_usdhc(struct pltfm_imx_data *data)
+{
+	return data->socdata == &usdhc_s32v234_data;
+}
+
+static inline int is_s32gen1_usdhc(struct pltfm_imx_data *data)
+{
+	return data->socdata == &usdhc_s32gen1_data;
 }
 
 static inline int esdhc_is_usdhc(struct pltfm_imx_data *data)
@@ -339,17 +382,39 @@ static u32 esdhc_readl_le(struct sdhci_host *host, int reg)
 	if (unlikely(reg == SDHCI_CAPABILITIES_1)) {
 		if (esdhc_is_usdhc(imx_data)) {
 			if (imx_data->socdata->flags & ESDHC_FLAG_HAVE_CAP1)
-				val = readl(host->ioaddr + SDHCI_CAPABILITIES) & 0xFFFF;
-			else
-				/* imx6q/dl does not have cap_1 register, fake one */
-				val = SDHCI_SUPPORT_DDR50 | SDHCI_SUPPORT_SDR104
-					| SDHCI_SUPPORT_SDR50
-					| SDHCI_USE_SDR50_TUNING
-					| (SDHCI_TUNING_MODE_3 << SDHCI_RETUNING_MODE_SHIFT);
-
+				val = readl(host->ioaddr + SDHCI_CAPABILITIES)
+					& 0xFFFF;
+			else {
+				if (is_sac58r_usdhc(imx_data)
+					|| is_s32v234_usdhc(imx_data)
+					|| is_s32gen1_usdhc(imx_data)) {
+					/*
+					 * sac58r and s32v234 HOST_CTRL_CAP
+					 * register does not provide speed info.
+					 * __Only__ sac58r does not support
+					 * DDR50, but this is needed to support
+					 * DDR50 SD cards. If this is not
+					 * enabled, a lot of TIMEOUT errors get
+					 * returned when trying to access SD
+					 * card.
+					 */
+					val = SDHCI_SUPPORT_SDR50
+						| SDHCI_SUPPORT_DDR50;
+				} else
+					/* imx6q/dl does not have cap_1
+					 * register, fake one
+					 */
+					val = SDHCI_SUPPORT_DDR50
+						| SDHCI_SUPPORT_SDR104
+						| SDHCI_SUPPORT_SDR50
+						| SDHCI_USE_SDR50_TUNING
+						| (SDHCI_TUNING_MODE_3
+						<< SDHCI_RETUNING_MODE_SHIFT);
+			}		
 			if (imx_data->socdata->flags & ESDHC_FLAG_HS400)
 				val |= SDHCI_SUPPORT_HS400;
 
+#if !defined(CONFIG_SOC_S32GEN1)
 			/*
 			 * Do not advertise faster UHS modes if there are no
 			 * pinctrl states for 100MHz/200MHz.
@@ -358,6 +423,7 @@ static u32 esdhc_readl_le(struct sdhci_host *host, int reg)
 			    IS_ERR_OR_NULL(imx_data->pins_200mhz))
 				val &= ~(SDHCI_SUPPORT_SDR50 | SDHCI_SUPPORT_DDR50
 					 | SDHCI_SUPPORT_SDR104 | SDHCI_SUPPORT_HS400);
+#endif
 		}
 	}
 
@@ -808,8 +874,11 @@ static inline void esdhc_pltfm_set_clock(struct sdhci_host *host,
 		writel(val | ESDHC_VENDOR_SPEC_FRC_SDCLK_ON,
 			host->ioaddr + ESDHC_VENDOR_SPEC);
 	}
-
+#if defined(CONFIG_S32GEN1_EMULATOR)
+	udelay(1);
+#else
 	mdelay(1);
+#endif
 }
 
 static unsigned int esdhc_pltfm_get_ro(struct sdhci_host *host)
@@ -870,7 +939,12 @@ static void esdhc_prepare_tuning(struct sdhci_host *host, u32 val)
 	u32 reg;
 
 	/* FIXME: delay a bit for card to be ready for next tuning due to errors */
+
+#if defined(CONFIG_S32GEN1_EMULATOR)
+	udelay(1);
+#else
 	mdelay(1);
+#endif
 
 	reg = readl(host->ioaddr + ESDHC_MIX_CTRL);
 	reg |= ESDHC_MIX_CTRL_EXE_TUNE | ESDHC_MIX_CTRL_SMPCLK_SEL |
@@ -941,6 +1015,7 @@ static void esdhc_hs400_enhanced_strobe(struct mmc_host *mmc, struct mmc_ios *io
 	writel(m, host->ioaddr + ESDHC_MIX_CTRL);
 }
 
+#if !defined(CONFIG_SOC_S32GEN1)
 static int esdhc_change_pinstate(struct sdhci_host *host,
 						unsigned int uhs)
 {
@@ -973,6 +1048,7 @@ static int esdhc_change_pinstate(struct sdhci_host *host,
 
 	return pinctrl_select_state(imx_data->pinctrl, pinctrl);
 }
+#endif
 
 /*
  * For HS400 eMMC, there is a data_strobe line. This signal is generated
@@ -1089,7 +1165,9 @@ static void esdhc_set_uhs_signaling(struct sdhci_host *host, unsigned timing)
 		break;
 	}
 
+#if !defined(CONFIG_SOC_S32GEN1)
 	esdhc_change_pinstate(host, timing);
+#endif
 }
 
 static void esdhc_reset(struct sdhci_host *host, u8 mask)
@@ -1188,12 +1266,14 @@ static void sdhci_esdhc_imx_hwinit(struct sdhci_host *host)
 			| ESDHC_BURST_LEN_EN_INCR,
 			host->ioaddr + SDHCI_HOST_CONTROL);
 
-		/*
-		 * erratum ESDHC_FLAG_ERR004536 fix for MX6Q TO1.2 and MX6DL
-		 * TO1.1, it's harmless for MX6SL
-		 */
-		writel(readl(host->ioaddr + 0x6c) & ~BIT(7),
-			host->ioaddr + 0x6c);
+		if (!is_s32v234_usdhc(imx_data) && !is_s32gen1_usdhc(imx_data)) {
+			/*
+			 * erratum ESDHC_FLAG_ERR004536 fix for MX6Q TO1.2
+			 * and MX6DL TO1.1, it's harmless for MX6SL
+			 */
+			writel(readl(host->ioaddr + 0x6c) | BIT(7),
+				host->ioaddr + 0x6c);
+			}
 
 		/* disable DLL_CTRL delay line settings */
 		writel(0x0, host->ioaddr + ESDHC_DLL_CTRL);
@@ -1326,6 +1406,9 @@ sdhci_esdhc_imx_probe_dt(struct platform_device *pdev,
 	if (of_property_read_bool(np, "wp-gpios"))
 		boarddata->wp_type = ESDHC_WP_GPIO;
 
+	if (boarddata->wp_type == ESDHC_WP_NONE)
+		host->mmc->caps2 |= MMC_CAP2_NO_WRITE_PROTECT;
+
 	of_property_read_u32(np, "fsl,tuning-step", &boarddata->tuning_step);
 	of_property_read_u32(np, "fsl,tuning-start-tap",
 			     &boarddata->tuning_start_tap);
@@ -1336,14 +1419,29 @@ sdhci_esdhc_imx_probe_dt(struct platform_device *pdev,
 	if (of_property_read_u32(np, "fsl,delay-line", &boarddata->delay_line))
 		boarddata->delay_line = 0;
 
+	if (of_find_property(np, "keep-power-in-suspend", NULL))
+		host->mmc->pm_caps |= MMC_PM_KEEP_POWER;
+
+	if (of_find_property(np, "enable-sdio-wakeup", NULL))
+		host->mmc->pm_caps |= MMC_PM_WAKE_SDIO_IRQ;
+
 	mmc_of_parse_voltage(np, &host->ocr_mask);
 
-	if (esdhc_is_usdhc(imx_data) && !IS_ERR(imx_data->pins_default)) {
-		imx_data->pins_100mhz = pinctrl_lookup_state(imx_data->pinctrl,
-						ESDHC_PINCTRL_STATE_100MHZ);
-		imx_data->pins_200mhz = pinctrl_lookup_state(imx_data->pinctrl,
-						ESDHC_PINCTRL_STATE_200MHZ);
+#if !defined(CONFIG_SOC_S32GEN1)
+	/* UHS-I support: sac58r does not have pinctrl driver
+	 * however, there's 1.8V support.
+	 * So, ignore the pinctrl lookup.
+	 * FIXME: there must be a better way to handle this!
+	 */
+	if (!is_sac58r_usdhc(imx_data) && !is_s32v234_usdhc(imx_data) && !is_s32gen1_usdhc(imx_data)) {
+		if (esdhc_is_usdhc(imx_data) && !IS_ERR(imx_data->pins_default)) {
+			imx_data->pins_100mhz = pinctrl_lookup_state(imx_data->pinctrl,
+							ESDHC_PINCTRL_STATE_100MHZ);
+			imx_data->pins_200mhz = pinctrl_lookup_state(imx_data->pinctrl,
+							ESDHC_PINCTRL_STATE_200MHZ);
+		}
 	}
+#endif
 
 	/* call to generic mmc_of_parse to support additional capabilities */
 	ret = mmc_of_parse(host->mmc);
@@ -1487,6 +1585,7 @@ static int sdhci_esdhc_imx_probe(struct platform_device *pdev)
 	if (err)
 		goto disable_ipg_clk;
 
+#if !defined(CONFIG_SOC_S32GEN1)
 	imx_data->pinctrl = devm_pinctrl_get(&pdev->dev);
 	if (IS_ERR(imx_data->pinctrl)) {
 		err = PTR_ERR(imx_data->pinctrl);
@@ -1497,6 +1596,7 @@ static int sdhci_esdhc_imx_probe(struct platform_device *pdev)
 						PINCTRL_STATE_DEFAULT);
 	if (IS_ERR(imx_data->pins_default))
 		dev_warn(mmc_dev(host->mmc), "could not get default state\n");
+#endif
 
 	if (esdhc_is_usdhc(imx_data)) {
 		host->quirks2 |= SDHCI_QUIRK2_PRESET_VALUE_BROKEN;
@@ -1532,6 +1632,9 @@ static int sdhci_esdhc_imx_probe(struct platform_device *pdev)
 					esdhc_hs400_enhanced_strobe;
 	}
 
+	if (imx_data->socdata->flags & ESDHC_FLAG_MULTIBLK_READ_ACMD12)
+		host->quirks |= SDHCI_QUIRK_MULTIBLOCK_READ_ACMD12;
+
 	if (imx_data->socdata->flags & ESDHC_FLAG_CQHCI) {
 		host->mmc->caps2 |= MMC_CAP2_CQE | MMC_CAP2_CQE_DCMD;
 		cq_host = devm_kzalloc(&pdev->dev, sizeof(*cq_host), GFP_KERNEL);
@@ -1558,6 +1661,13 @@ static int sdhci_esdhc_imx_probe(struct platform_device *pdev)
 	host->tuning_delay = 1;
 
 	sdhci_esdhc_imx_hwinit(host);
+
+	if (is_s32v234_usdhc(imx_data) || is_s32gen1_usdhc(imx_data))
+		host->quirks2 |= SDHCI_QUIRK2_NO_1_8_V;
+
+	if (host->mmc->pm_caps & MMC_PM_KEEP_POWER &&
+		host->mmc->pm_caps & MMC_PM_WAKE_SDIO_IRQ)
+		device_init_wakeup(&pdev->dev, 1);
 
 	err = sdhci_add_host(host);
 	if (err)
@@ -1589,7 +1699,13 @@ static int sdhci_esdhc_imx_remove(struct platform_device *pdev)
 	struct sdhci_host *host = platform_get_drvdata(pdev);
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct pltfm_imx_data *imx_data = sdhci_pltfm_priv(pltfm_host);
-	int dead = (readl(host->ioaddr + SDHCI_INT_STATUS) == 0xffffffff);
+	int dead;
+
+	clk_prepare_enable(imx_data->clk_per);
+	clk_prepare_enable(imx_data->clk_ipg);
+	clk_prepare_enable(imx_data->clk_ahb);
+
+	dead = (readl(host->ioaddr + SDHCI_INT_STATUS) == 0xffffffff);
 
 	pm_runtime_get_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);

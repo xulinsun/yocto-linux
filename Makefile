@@ -277,6 +277,17 @@ ifneq ($(filter $(no-sync-config-targets), $(MAKECMDGOALS)),)
 	endif
 endif
 
+ifneq ($(SDKTARGETSYSROOT),)
+        ifneq ($(filter scripts prepare, $(MAKECMDGOALS)),)
+		PKG_CONFIG_SYSROOT_DIR = 
+		PKG_CONFIG_PATH = $(OECORE_NATIVE_SYSROOT)/usr/lib/pkgconfig:$(OECORE_NATIVE_SYSROOT)/usr/share/pkgconfig
+		export PKG_CONFIG_SYSROOT_DIR
+		export PKG_CONFIG_PATH
+$(info Changed PKG_CONFIG_SYSROOT_DIR to '$(PKG_CONFIG_SYSROOT_DIR)')
+$(info Changed PKG_CONFIG_PATH to '$(PKG_CONFIG_PATH)')
+        endif
+endif
+
 ifneq ($(KBUILD_EXTMOD),)
 	may-sync-config :=
 endif
@@ -998,7 +1009,7 @@ mod_sign_cmd = true
 endif
 export mod_sign_cmd
 
-HOST_LIBELF_LIBS = $(shell pkg-config libelf --libs 2>/dev/null || echo -lelf)
+HOST_LIBELF_LIBS = $(shell export PKG_CONFIG_PATH=$(PKG_CONFIG_PATH); export PKG_CONFIG_SYSROOT_DIR=$(PKG_CONFIG_SYSROOT_DIR); pkg-config libelf --libs 2>/dev/null || echo -lelf)
 
 ifdef CONFIG_STACK_VALIDATION
   has_libelf := $(call try-run,\
