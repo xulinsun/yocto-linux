@@ -23,10 +23,8 @@ hostprogs-$(CONFIG_SYSTEM_EXTRA_CERTIFICATE) += insert-sys-cert
 
 HOSTCFLAGS_sortextable.o = -I$(srctree)/tools/include
 HOSTCFLAGS_asn1_compiler.o = -I$(srctree)/include
-LIBCRYPTO_LIBS  := $(shell pkg-config libcrypto --libs 2>/dev/null || echo -lcrypto)
-$(info $(LIBCRYPTO_LIBS))
-HOSTLDLIBS_sign-file = $(LIBCRYPTO_LIBS)
-HOSTLDLIBS_extract-cert = $(LIBCRYPTO_LIBS) -lpthread
+HOSTLDLIBS_sign-file = -lcrypto
+HOSTLDLIBS_extract-cert = -lcrypto
 
 always		:= $(hostprogs-y) $(hostprogs-m)
 
