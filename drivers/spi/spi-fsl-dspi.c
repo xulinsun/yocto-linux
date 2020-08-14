@@ -701,6 +701,7 @@ static int dspi_eoq_write(struct fsl_dspi *dspi)
 			 * least significant 16 bits only. We'll push the other
 			 * 16 bits after we have written to the CMD-FIFO.
 			 */
+			/* fall through */
 		case FM_BYTES_2:
 			dspi_pushr = dspi_data_to_pushr(dspi, 1);
 			break;
