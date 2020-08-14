@@ -112,6 +112,7 @@ static unsigned long get_pllx_phiy_max_rate(enum s32v234_plldig_type plltype,
 				case 1:
 					return -EINVAL;
 			}
+			break;
 		default:
 			pr_warn("Unsupported PLL. Use: %d or %d\n",
 				S32_PLLDIG_ARM,
