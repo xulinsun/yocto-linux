@@ -31,13 +31,13 @@
 #endif
 
 #include "pci-s32gen1-regs.h"
-#include "pci-s32gen1.h"
 #include "../../pci.h"
 
 #ifdef CONFIG_PCI_DW_DMA
 #include <linux/dma-mapping.h>
 #include "pci-dma-s32.h"
 #endif
+#include "pci-s32gen1.h"
 
 #ifdef DEBUG
 #ifdef CONFIG_PCI_S32GEN1_DEBUG_READS
