@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 NXP
+ * Copyright 2017,2020 NXP
  *
  * This program is free software; you can redistribute  it and/or modify it
  * under  the terms of  the GNU General  Public License as published by the
@@ -69,8 +69,10 @@ static int nxp_config_init(struct phy_device *phydev)
 
 		if (reg_val & ESTATUS_100T1_FULL) {
 			/* update phydev to include the supported features */
-			phydev->supported |= SUPPORTED_100BASET1_FULL;
-			phydev->advertising |= ADVERTISED_100BASET1_FULL;
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+					 phydev->supported);
+			linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+					 phydev->advertising);
 		}
 	}
 
@@ -159,6 +161,20 @@ static int nxp_config_init(struct phy_device *phydev)
 	phydev->interrupts = PHY_INTERRUPT_ENABLED;
 	phydev->drv->config_intr(phydev);
 
+	/* Setup and queue a polling function:
+	 *
+	 * The phy_queue is normally used to schedule the interrupt handler
+	 * from interrupt context after an irq has been received.
+	 * Here it is repurposed as scheduling mechanism for the poll function
+	 */
+	if (((struct nxp_specific_data *)phydev->priv)->poll_setup == 0) {
+		cancel_work_sync(&phydev->phy_queue);
+		INIT_WORK(&phydev->phy_queue, poll);
+		queue_work(system_power_efficient_wq, &phydev->phy_queue);
+
+		((struct nxp_specific_data *)phydev->priv)->poll_setup = 1;
+	}
+
 	return 0;
 
 /* error handling */
@@ -232,6 +248,9 @@ static void nxp_remove(struct phy_device *phydev)
 		kzfree(phydev->priv);
 		phydev->priv = NULL;
 	}
+
+	/* cancel scheduled work */
+	cancel_work_sync(&phydev->phy_queue);
 }
 
 /* Clears any pending interrupts */
@@ -413,7 +432,7 @@ static void poll(struct work_struct *work)
 
 	/* requeue poll function */
 	msleep(POLL_PAUSE);	/* msleep is non-blocking */
-	phy_trigger_machine(phydev);
+	queue_work(system_power_efficient_wq, &phydev->phy_queue);
 }
 
 /* helper function, waits until a given condition is met
@@ -1883,7 +1902,7 @@ static struct phy_driver nxp_drivers[] = {
 	 .phy_id = NXP_PHY_ID_TJA1100,
 	 .name = "TJA1100",
 	 .phy_id_mask = NXP_PHY_ID_MASK,
-	 .features = (SUPPORTED_TP | SUPPORTED_MII | SUPPORTED_100BASET1_FULL),
+	 .features = PHY_BASIC_T1_FEATURES,
 	 .flags = 0,
 	 .probe = &nxp_probe,
 	 .remove = &nxp_remove,
@@ -1900,7 +1919,7 @@ static struct phy_driver nxp_drivers[] = {
 	 .phy_id = NXP_PHY_ID_TJA1102P0,
 	 .name = "TJA1102_p0",
 	 .phy_id_mask = NXP_PHY_ID_MASK,
-	 .features = (SUPPORTED_TP | SUPPORTED_MII | SUPPORTED_100BASET1_FULL),
+	 .features = PHY_BASIC_T1_FEATURES,
 	 .flags = 0,
 	 .probe = &nxp_probe,
 	 .remove = &nxp_remove,
@@ -1917,7 +1936,7 @@ static struct phy_driver nxp_drivers[] = {
 	 .phy_id = NXP_PHY_ID_TJA1102S,
 	 .name = "TJA1102S",
 	 .phy_id_mask = NXP_PHY_ID_MASK,
-	 .features = (SUPPORTED_TP | SUPPORTED_MII | SUPPORTED_100BASET1_FULL),
+	 .features = PHY_BASIC_T1_FEATURES,
 	 .flags = 0,
 	 .probe = &nxp_probe,
 	 .remove = &nxp_remove,
@@ -1937,7 +1956,7 @@ static struct phy_driver nxp_TJA1102p1_fixup_driver = {
 	.phy_id = NXP_PHY_ID_TJA1102P1,
 	.name = "TJA1102_p1",
 	.phy_id_mask = NXP_PHY_ID_MASK,
-	.features = (SUPPORTED_TP | SUPPORTED_MII | SUPPORTED_100BASET1_FULL),
+	.features = PHY_BASIC_T1_FEATURES,
 	.flags = 0,
 	.probe = &nxp_probe,
 	.remove = &nxp_remove,

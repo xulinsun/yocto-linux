@@ -5,6 +5,7 @@
  * derived from the OF-version.
  *
  * Copyright (c) 2010 Pengutronix e.K.
+ * Copyright 2020 NXP
  *   Author: Wolfram Sang <kernel@pengutronix.de>
  */
 
@@ -212,6 +213,23 @@ static const struct esdhc_soc_data usdhc_imx7d_data = {
 			| ESDHC_FLAG_HS400,
 };
 
+static struct esdhc_soc_data esdhc_vf610_data = {
+	.flags = ESDHC_FLAG_HS400_ES,
+};
+
+static struct esdhc_soc_data usdhc_sac58r_data = {
+	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_HS400_ES,
+};
+
+static struct esdhc_soc_data usdhc_s32v234_data = {
+	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_HS400_ES,
+};
+
+static struct esdhc_soc_data usdhc_s32gen1_data = {
+	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_HS400_ES
+			| ESDHC_FLAG_HS200,
+};
+
 static struct esdhc_soc_data usdhc_imx7ulp_data = {
 	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_STD_TUNING
 			| ESDHC_FLAG_HAVE_CAP1 | ESDHC_FLAG_HS200
@@ -223,23 +241,6 @@ static struct esdhc_soc_data usdhc_imx8qxp_data = {
 			| ESDHC_FLAG_HAVE_CAP1 | ESDHC_FLAG_HS200
 			| ESDHC_FLAG_HS400 | ESDHC_FLAG_HS400_ES
 			| ESDHC_FLAG_CQHCI,
-};
-
-static struct esdhc_soc_data esdhc_vf610_data = {
-	.flags = ESDHC_FLAG_MULTIBLK_READ_ACMD12,
-};
-
-static struct esdhc_soc_data usdhc_sac58r_data = {
-	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_MULTIBLK_READ_ACMD12,
-};
-
-static struct esdhc_soc_data usdhc_s32v234_data = {
-	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_MULTIBLK_READ_ACMD12,
-};
-
-static struct esdhc_soc_data usdhc_s32gen1_data = {
-	.flags = ESDHC_FLAG_USDHC | ESDHC_FLAG_MULTIBLK_READ_ACMD12
-			| ESDHC_FLAG_HS200,
 };
 
 struct pltfm_imx_data {
@@ -292,12 +293,12 @@ static const struct of_device_id imx_esdhc_dt_ids[] = {
 	{ .compatible = "fsl,imx6q-usdhc", .data = &usdhc_imx6q_data, },
 	{ .compatible = "fsl,imx6ull-usdhc", .data = &usdhc_imx6ull_data, },
 	{ .compatible = "fsl,imx7d-usdhc", .data = &usdhc_imx7d_data, },
-	{ .compatible = "fsl,imx7ulp-usdhc", .data = &usdhc_imx7ulp_data, },
-	{ .compatible = "fsl,imx8qxp-usdhc", .data = &usdhc_imx8qxp_data, },
 	{ .compatible = "fsl,vf610-esdhc", .data = &esdhc_vf610_data, },
 	{ .compatible = "fsl,sac58r-usdhc", .data = &usdhc_sac58r_data, },
 	{ .compatible = "fsl,s32v234-usdhc", .data = &usdhc_s32v234_data,},
 	{ .compatible = "fsl,s32gen1-usdhc", .data = &usdhc_s32gen1_data,},
+	{ .compatible = "fsl,imx7ulp-usdhc", .data = &usdhc_imx7ulp_data, },
+	{ .compatible = "fsl,imx8qxp-usdhc", .data = &usdhc_imx8qxp_data, },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, imx_esdhc_dt_ids);
@@ -1266,14 +1267,15 @@ static void sdhci_esdhc_imx_hwinit(struct sdhci_host *host)
 			| ESDHC_BURST_LEN_EN_INCR,
 			host->ioaddr + SDHCI_HOST_CONTROL);
 
-		if (!is_s32v234_usdhc(imx_data) && !is_s32gen1_usdhc(imx_data)) {
+		if (!is_s32v234_usdhc(imx_data) &&
+			!is_s32gen1_usdhc(imx_data)) {
 			/*
 			 * erratum ESDHC_FLAG_ERR004536 fix for MX6Q TO1.2
 			 * and MX6DL TO1.1, it's harmless for MX6SL
 			 */
-			writel(readl(host->ioaddr + 0x6c) | BIT(7),
+			writel(readl(host->ioaddr + 0x6c) & ~BIT(7),
 				host->ioaddr + 0x6c);
-			}
+		}
 
 		/* disable DLL_CTRL delay line settings */
 		writel(0x0, host->ioaddr + ESDHC_DLL_CTRL);
@@ -1729,6 +1731,8 @@ static int sdhci_esdhc_imx_remove(struct platform_device *pdev)
 static int sdhci_esdhc_suspend(struct device *dev)
 {
 	struct sdhci_host *host = dev_get_drvdata(dev);
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct pltfm_imx_data *imx_data = sdhci_pltfm_priv(pltfm_host);
 	int ret;
 
 	if (host->mmc->caps2 & MMC_CAP2_CQE) {
@@ -1740,13 +1744,33 @@ static int sdhci_esdhc_suspend(struct device *dev)
 	if (host->tuning_mode != SDHCI_TUNING_MODE_3)
 		mmc_retune_needed(host->mmc);
 
-	return sdhci_suspend_host(host);
+	ret = sdhci_suspend_host(host);
+	if (ret)
+		return ret;
+
+	clk_disable_unprepare(imx_data->clk_per);
+	clk_disable_unprepare(imx_data->clk_ipg);
+	clk_disable_unprepare(imx_data->clk_ahb);
+
+	return ret;
 }
 
 static int sdhci_esdhc_resume(struct device *dev)
 {
 	struct sdhci_host *host = dev_get_drvdata(dev);
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct pltfm_imx_data *imx_data = sdhci_pltfm_priv(pltfm_host);
 	int ret;
+
+	ret = clk_prepare_enable(imx_data->clk_per);
+	if (ret)
+		return ret;
+	ret = clk_prepare_enable(imx_data->clk_ipg);
+	if (ret)
+		goto disable_per_clk;
+	ret = clk_prepare_enable(imx_data->clk_ahb);
+	if (ret)
+		goto disable_ipg_clk;
 
 	/* re-initialize hw state in case it's lost in low power mode */
 	sdhci_esdhc_imx_hwinit(host);
@@ -1758,6 +1782,12 @@ static int sdhci_esdhc_resume(struct device *dev)
 	if (host->mmc->caps2 & MMC_CAP2_CQE)
 		ret = cqhci_resume(host->mmc);
 
+	return sdhci_resume_host(host);
+
+disable_per_clk:
+	clk_disable_unprepare(imx_data->clk_per);
+disable_ipg_clk:
+	clk_disable_unprepare(imx_data->clk_ipg);
 	return ret;
 }
 #endif
